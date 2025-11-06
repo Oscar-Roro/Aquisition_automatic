@@ -8,7 +8,7 @@ plt.close("all")
 timestr = time.strftime("%Y-%m-%d_%H-%M")
 print("Fecha:", timestr)
 
-add_path = "2025_10_27_01"
+add_path = "2025_10_27_01" # Additional pathing towards carpet
 prismWollas = ""#  input("¿ Has puesto el prisma ? : ").strip()
 estudio = "si Heat/si PBS_"
 
@@ -103,18 +103,16 @@ def save_frames(acqs, gain, frames, exposure, gatemode, gate_width_sec,add_path)
 
 def main():
     
-    # --- Parameter sweeps ---
-    exposure_times_s = [1e-5,1e-4,5e-4,1e-3,1.5e-3,2e-3,2.5e-3,3e-3,6e-3,1e-2] # seconds
-    gate_widths_s = [1e-8,1e-7,1e-6,1e-5] # seconds
-    exposure_times_s = np.linspace(9e-6,1e-3,20)
-    gate_widths_s = np.linspace(1e-12,10e-6,20)
-    gains =  [4095]
-    frame_count = 10
-
+    # --- Parameter sweeps --- Use LISTS
+    exposure_times_s = [2.5e-3] # seconds
+    gate_widths_s = [5e-9] # seconds
+    gains =  [4095] # int
+    frame_count = 10 # int
+    # --- Create Camera Object  
     sdk3 = AndorSDK3()
     cam = sdk3.GetCamera(0)
     print("Cámara conectada:", cam.SerialNumber)
-
+    # Cooldown camera
     cam.SensorCooling = True
     while cam.SensorTemperature > 2.0:
         print(f"Temperature: {cam.SensorTemperature:.2f}C")
@@ -122,25 +120,25 @@ def main():
             raise RuntimeError("Fallo en la refrigeración del sensor")
         time.sleep(5)
     print("Sensor estabilizado.")
-
+    # Configure Gating Mode
     cam.GateMode = "DDG"
     gatemode = cam.GateMode
-    print(f"Test to know size {cam.ImageSizeBytes}")
+    print(f"Test to know size {cam.ImageSizeBytes}") 
     cam.AOIHeight = 900 #2150 #2160
     cam.AOIWidth = 1500 #2540 #2560
     cam.AOITop = 100 #1
     cam.AOILeft = 400 #1
     cam.PixelEncoding = "Mono12Packed"
     cam.FrameRate = cam.max_FrameRate
-
+    # Set Camera Variables 
     width, height = cam.AOIWidth, cam.AOIHeight
     gain_target = cam.MCPGain
+    # --- Start Acquisitions, saved as LIST in 'acqs' variable
     acqs = custom_acquire_series(cam, frame_count, width, height)
     print("\n Adquisición completada.")
-
+    # --- Loop process in case you want to sweep through multiple parameters
     total_runs = len(exposure_times_s) * len(gate_widths_s) * len(gains)
     run = 1
-
     for _gain in gains:
         cam.MCPGain = _gain
         for _exposure_time_s in exposure_times_s:
@@ -151,7 +149,7 @@ def main():
                 print(f"DDGOutputWidth configurado a {_gate_width_ps} ps")
                 print(f"\n--- Run {run}/{total_runs} ---")
                 print(f"Gain: {_gain}, Exposure: {_exposure_time_s}s, Gate width: {_gate_width_ps}ps")
-
+                
                 acqs = custom_acquire_series(cam, frame_count, width, height)
                 plot_and_save_first_frame(acqs, _gain, _exposure_time_s, gatemode, _gate_width_s,add_path)
                 save_frames(acqs, _gain, frame_count, _exposure_time_s, gatemode, _gate_width_s,add_path)
