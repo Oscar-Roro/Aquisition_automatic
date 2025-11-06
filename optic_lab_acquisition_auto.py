@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from pyAndorSDK3 import AndorSDK3
 plt.close("all")
 timestr = time.strftime("%Y-%m-%d_%H-%M")
-print("Fecha:", timestr)
+print("Fecha:", timestr )
 
 add_path = "2025_11_03_00"
 prismWollas = ""#  input("¿ Has puesto el prisma ? : ").strip()
