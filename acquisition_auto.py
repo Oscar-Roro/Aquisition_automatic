@@ -9,9 +9,9 @@ timestr = time.strftime("%Y-%m-%d_%H-%M")
 print("Fecha:", timestr)
 
 add_path = "2025_10_27_01" # Additional pathing towards carpet
+
 prismWollas = ""#  input("¿ Has puesto el prisma ? : ").strip()
 estudio = "si Heat/si PBS_"
-
 if prismWollas in ["yes", "y", "Y", "Yes", "si", "Si", "SI"]:
     grad_prismWollas = float(input("Graduación del prism (en º): "))
     estudio = "no Heat/si PBS_"
@@ -35,18 +35,26 @@ def unpack_mono12_packed(buffer, width, height):
     return pixels.reshape((height, width))
 
 def process_image(acquisition, width, height):
+    ti_process_img = time.perf_counter() 
+    print("Inside process_image"+"o-"*10)
     raw_data = acquisition._np_data.tobytes()
     img = unpack_mono12_packed(raw_data, width, height)
+    print("type of img : ",type(img))
     acquisition._np_data = img
+    print("type of acquisition : ",type(acquisition))
+    print("Time taken processing image : ",time.perf_counter()-ti_process_img)
     return acquisition
 
 def custom_acquire_series(cam, frame_count = 1, width = 2150, height = 2540):
+    print("Inside custom_acquire_series"+"-*-*"*10)
+    ti_custom_acq_srs = time.time()
     timeout = 15000 # can determine the maximum exposure too
     cam.TriggerMode = "Software"
     cam.CycleMode = "Fixed"
     cam.FrameCount = frame_count
 
     imgsize = cam.ImageSizeBytes
+    print(f"imgsize : {imgsize}, type(imgsize) : {type(imgsize)}")
     for _ in range(frame_count):
         buf = np.empty((imgsize,), dtype='B') # "B" es uint8
         cam.queue(buf, imgsize)
@@ -63,6 +71,8 @@ def custom_acquire_series(cam, frame_count = 1, width = 2150, height = 2540):
     finally:# stop
         cam.AcquisitionStop()
         cam.flush()
+        print("Time taken in custom acquire series : ", time.time()-ti_custom_acq_srs)
+        print(f"Final size of series : {len(series)}, type(series) : {type(series)}")
     return list(series)
 
 def plot_and_save_first_frame(acqs, gain, exposure, gatemode, gate_width_sec,add_path):
@@ -90,7 +100,10 @@ def plot_and_save_first_frame(acqs, gain, exposure, gatemode, gate_width_sec,add
     print(f"Imagen guardada como {img_path}")
 
 def save_frames(acqs, gain, frames, exposure, gatemode, gate_width_sec,add_path):
+    print("Inside save_frames"+"--.."*10)
+    ti_save = time.perf_counter()
     imgs = np.stack([acq._np_data for acq in acqs]) #imgs.shape = (N, H, W)
+    t0 = time.perf_counter() - ti_save
     name = f"gn{gain}_n{frames}_t{exposure}_gate_{gatemode}"
     if gatemode == "DDG":
         name += f"_width{gate_width_sec:.2e}"
@@ -100,9 +113,12 @@ def save_frames(acqs, gain, frames, exposure, gatemode, gate_width_sec,add_path)
     path = f"acqui-pics//{add_path}" + name + "_" + timestr + ".npz"
     np.savez_compressed(path, images=imgs)
     print(f"Frames guardados en {os.path.abspath(path)}")
+    tf_save = time.perf_counter() - ti_save
+    print(f"time spent passing aqc_as_list to numpy.stack_imgs : {t0}")
+    print(f"Time taken with function save_frames {tf_save}")
 
 def main():
-    
+    time_start = time.time()
     # --- Parameter sweeps --- Use LISTS
     exposure_times_s = [2.5e-3] # seconds
     gate_widths_s = [5e-9] # seconds
@@ -133,30 +149,28 @@ def main():
     # Set Camera Variables 
     width, height = cam.AOIWidth, cam.AOIHeight
     gain_target = cam.MCPGain
-    # --- Start Acquisitions, saved as LIST in 'acqs' variable
-    acqs = custom_acquire_series(cam, frame_count, width, height)
-    print("\n Adquisición completada.")
     # --- Loop process in case you want to sweep through multiple parameters
-    total_runs = len(exposure_times_s) * len(gate_widths_s) * len(gains)
     run = 1
+    total_runs = len(exposure_times_s) * len(gate_widths_s) * len(gains)
     for _gain in gains:
         cam.MCPGain = _gain
         for _exposure_time_s in exposure_times_s:
             for _gate_width_s in gate_widths_s:
                 _gate_width_ps = int(_gate_width_s * 1e12) # convertir a picosegundos
-                cam.DDGOpticalWidthEnable = True #don't know if this needs to be in the loop or outside
+                cam.DDGOpticalWidthEnable = True # don't know if this needs to be in the loop or outside
                 cam.DDGOutputWidth = _gate_width_ps
                 print(f"DDGOutputWidth configurado a {_gate_width_ps} ps")
                 print(f"\n--- Run {run}/{total_runs} ---")
                 print(f"Gain: {_gain}, Exposure: {_exposure_time_s}s, Gate width: {_gate_width_ps}ps")
-                
+                 # --- Start Acquisitions, saved as LIST in 'acqs' variable
                 acqs = custom_acquire_series(cam, frame_count, width, height)
-                plot_and_save_first_frame(acqs, _gain, _exposure_time_s, gatemode, _gate_width_s,add_path)
+                #plot_and_save_first_frame(acqs, _gain, _exposure_time_s, gatemode, _gate_width_s,add_path)
                 save_frames(acqs, _gain, frame_count, _exposure_time_s, gatemode, _gate_width_s,add_path)
                 run += 1
                 time.sleep(2)  # Optional pause between runs
+    time_end = time.time() - time_start
     print("\nTodas las adquisiciones completadas exitosamente.")
-
+    print(f"El programa se completo después de {time_end}s")
 if __name__ == "__main__":
     main()
     plt.show()
