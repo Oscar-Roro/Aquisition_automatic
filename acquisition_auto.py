@@ -8,10 +8,10 @@ plt.close("all")
 timestr = time.strftime("%Y-%m-%d_%H-%M")
 print("Fecha:", timestr)
 
-add_path = "2025_10_27_01" # Additional pathing towards carpet
-
+add_path = "2025_11_26_fast_00"
 prismWollas = ""#  input("¿ Has puesto el prisma ? : ").strip()
-estudio = "si Heat/si PBS_"
+estudio = "no Heat/si PBS_"
+
 if prismWollas in ["yes", "y", "Y", "Yes", "si", "Si", "SI"]:
     grad_prismWollas = float(input("Graduación del prism (en º): "))
     estudio = "no Heat/si PBS_"
@@ -34,45 +34,34 @@ def unpack_mono12_packed(buffer, width, height):
     assert pixels.size == width * height, "Tamaño de imagen incompatible"
     return pixels.reshape((height, width))
 
-def process_image(acquisition, width, height):
-    ti_process_img = time.perf_counter() 
-    print("Inside process_image"+"o-"*10)
+def process_image(acquisition, width, height): # function takes ~ 20-5 ms
     raw_data = acquisition._np_data.tobytes()
-    img = unpack_mono12_packed(raw_data, width, height)
-    print("type of img : ",type(img))
-    acquisition._np_data = img
-    print("type of acquisition : ",type(acquisition))
-    print("Time taken processing image : ",time.perf_counter()-ti_process_img)
+    img = unpack_mono12_packed(raw_data, width, height) # <class 'numpy.ndarray'>
+    acquisition._np_data = img # acquisition <class 'pyAndorSDK3.andor_acquisition.Acquisition'> 
     return acquisition
 
-def custom_acquire_series(cam, frame_count = 1, width = 2150, height = 2540):
-    print("Inside custom_acquire_series"+"-*-*"*10)
-    ti_custom_acq_srs = time.time()
+def custom_acquire_series(cam, frame_count = 1, width = 2150, height = 2540): # function takes ~ 500-400ms
     timeout = 15000 # can determine the maximum exposure too
     cam.TriggerMode = "Software"
     cam.CycleMode = "Fixed"
     cam.FrameCount = frame_count
-
-    imgsize = cam.ImageSizeBytes
-    print(f"imgsize : {imgsize}, type(imgsize) : {type(imgsize)}")
+    imgsize = cam.ImageSizeBytes # <class 'int'>
     for _ in range(frame_count):
         buf = np.empty((imgsize,), dtype='B') # "B" es uint8
         cam.queue(buf, imgsize)
 
-    series = deque() #¿necesario si no haces appendleft()?
-    try:# start 
+    series = deque() #¿necesario si no haces appendleft()?, <class 'collections.deque'>
+    try: # start 
         cam.AcquisitionStart()  
         for frame in range(frame_count):
             cam.SoftwareTrigger()
             acq = cam.wait_buffer(timeout)
-            acq = process_image(acq, width, height)
-            series.append(acq)
+            acq = process_image(acq, width, height) # <class 'pyAndorSDK3.andor_acquisition.Acquisition'>
+            series.append(acq) # <len 'frame_count'>, <class 'collections.deque'>, function takes ~ 1.5us
             print(f"{(frame + 1) / frame_count * 100:.0f}% complete series", end="\r")
-    finally:# stop
+    finally: # stop
         cam.AcquisitionStop()
         cam.flush()
-        print("Time taken in custom acquire series : ", time.time()-ti_custom_acq_srs)
-        print(f"Final size of series : {len(series)}, type(series) : {type(series)}")
     return list(series)
 
 def plot_and_save_first_frame(acqs, gain, exposure, gatemode, gate_width_sec,add_path):
@@ -99,36 +88,34 @@ def plot_and_save_first_frame(acqs, gain, exposure, gatemode, gate_width_sec,add
     #plt.show()
     print(f"Imagen guardada como {img_path}")
 
-def save_frames(acqs, gain, frames, exposure, gatemode, gate_width_sec,add_path):
-    print("Inside save_frames"+"--.."*10)
-    ti_save = time.perf_counter()
-    imgs = np.stack([acq._np_data for acq in acqs]) #imgs.shape = (N, H, W)
-    t0 = time.perf_counter() - ti_save
+def save_frames(acqs, gain, frames, exposure, gatemode, gate_width_sec,add_path,iteration): # function takes ~ 800ms for 5 frame_counts
+    imgs = np.stack([acq._np_data for acq in acqs])  #imgs.shape = (N, H, W), function takes ~ 4.5-1.5ms for 5 frame_counts
+    # - string name of file & path
     name = f"gn{gain}_n{frames}_t{exposure}_gate_{gatemode}"
     if gatemode == "DDG":
         name += f"_width{gate_width_sec:.2e}"
     name = name.replace(".", "p")
     if add_path != "":
         add_path = f"{add_path}//"
-    path = f"acqui-pics//{add_path}" + name + "_" + timestr + ".npz"
-    np.savez_compressed(path, images=imgs)
-    print(f"Frames guardados en {os.path.abspath(path)}")
-    tf_save = time.perf_counter() - ti_save
-    print(f"time spent passing aqc_as_list to numpy.stack_imgs : {t0}")
-    print(f"Time taken with function save_frames {tf_save}")
+    path = f"acqui-pics//{add_path}" + name + "_" + timestr + f"_iter{iteration}" + ".npz"
+    # - compress and save images
+    np.savez_compressed(path, images=imgs) # function takes ~ 800ms
+    #print(f"Frames guardados en {os.path.abspath(path)}")
 
 def main():
-    time_start = time.time()
-    # --- Parameter sweeps --- Use LISTS
+    # --- Parameter sweeps ---
     exposure_times_s = [2.5e-3] # seconds
-    gate_widths_s = [5e-9] # seconds
-    gains =  [4095] # int
-    frame_count = 10 # int
-    # --- Create Camera Object  
+    gate_widths_s = [100e-9]
+    # gate_widths_s = [1e-9,1e-8,1e-7,1e-6,1e-5] # seconds
+    # gate_widths_s = np.linspace(1e-10,1e-8,10)
+    gains =  [4095]
+    frame_count = 5
+    iterations = 2
+    # --- Create Camera Object 
     sdk3 = AndorSDK3()
     cam = sdk3.GetCamera(0)
     print("Cámara conectada:", cam.SerialNumber)
-    # Cooldown camera
+    # - Cooldown camera
     cam.SensorCooling = True
     while cam.SensorTemperature > 2.0:
         print(f"Temperature: {cam.SensorTemperature:.2f}C")
@@ -136,41 +123,49 @@ def main():
             raise RuntimeError("Fallo en la refrigeración del sensor")
         time.sleep(5)
     print("Sensor estabilizado.")
-    # Configure Gating Mode
+    # - Configure Gating Mode
     cam.GateMode = "DDG"
     gatemode = cam.GateMode
-    print(f"Test to know size {cam.ImageSizeBytes}") 
-    cam.AOIHeight = 900 #2150 #2160
-    cam.AOIWidth = 1500 #2540 #2560
-    cam.AOITop = 100 #1
-    cam.AOILeft = 400 #1
+    print(f"Test to know size {cam.ImageSizeBytes}")
+    cam.AOIHeight = 720 #2150 #2160
+    cam.AOIWidth = 1380 #2540 #2560
+    cam.AOITop = 90 #1
+    cam.AOILeft = 600 #1
     cam.PixelEncoding = "Mono12Packed"
     cam.FrameRate = cam.max_FrameRate
-    # Set Camera Variables 
+    # - Set Camera Variables 
     width, height = cam.AOIWidth, cam.AOIHeight
     gain_target = cam.MCPGain
     # --- Loop process in case you want to sweep through multiple parameters
     run = 1
-    total_runs = len(exposure_times_s) * len(gate_widths_s) * len(gains)
+    total_runs = len(exposure_times_s) * len(gate_widths_s) * len(gains) * iterations
     for _gain in gains:
         cam.MCPGain = _gain
         for _exposure_time_s in exposure_times_s:
             for _gate_width_s in gate_widths_s:
                 _gate_width_ps = int(_gate_width_s * 1e12) # convertir a picosegundos
-                cam.DDGOpticalWidthEnable = True # don't know if this needs to be in the loop or outside
-                cam.DDGOutputWidth = _gate_width_ps
-                print(f"DDGOutputWidth configurado a {_gate_width_ps} ps")
-                print(f"\n--- Run {run}/{total_runs} ---")
-                print(f"Gain: {_gain}, Exposure: {_exposure_time_s}s, Gate width: {_gate_width_ps}ps")
-                 # --- Start Acquisitions, saved as LIST in 'acqs' variable
-                acqs = custom_acquire_series(cam, frame_count, width, height)
-                #plot_and_save_first_frame(acqs, _gain, _exposure_time_s, gatemode, _gate_width_s,add_path)
-                save_frames(acqs, _gain, frame_count, _exposure_time_s, gatemode, _gate_width_s,add_path)
-                run += 1
-                time.sleep(2)  # Optional pause between runs
-    time_end = time.time() - time_start
+                cam.DDGOpticalWidthEnable = True #don't know if this needs to be in the loop or outside
+                cam.DDGOutputWidth = _gate_width_ps    
+                for _i_iter in range(iterations):
+                    run_t0 = time.time() 
+                    #print(f"DDGOutputWidth configurado a {_gate_width_ps} ps")
+                    print(f"\n--- Run {run}/{total_runs} ---")
+                    #print(f"Gain: {_gain}, Exposure: {_exposure_time_s}s, Gate width: {_gate_width_ps}ps")
+                    # --- Start Acquisitions, saved as LIST in 'acqs' variable
+                    acqs = custom_acquire_series(cam, frame_count, width, height)
+                    #plot_and_save_first_frame(acqs, _gain, _exposure_time_s, gatemode, _gate_width_s,add_path)
+                    save_frames(acqs, _gain, frame_count, _exposure_time_s, gatemode, _gate_width_s,add_path,_i_iter) # function takes ~ 800ms
+                    run_t3 =  time.time() - run_t0 
+                    print(f"Run {_i_iter + 1} took : {run_t3}s  (no time.sleep)\n")
+                    time.sleep(2)  # Optional pause between runs
+                    run += 1
     print("\nTodas las adquisiciones completadas exitosamente.")
-    print(f"El programa se completo después de {time_end}s")
+    
 if __name__ == "__main__":
+
+    run_ti = time.time() 
     main()
+    run_tf =  time.time() - run_ti 
+    print(f"Full run took : {run_tf}s")
+
     plt.show()
