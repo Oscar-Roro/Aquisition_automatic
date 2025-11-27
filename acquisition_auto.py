@@ -9,9 +9,14 @@ timestr = time.strftime("%Y-%m-%d_%H-%M")
 print("Fecha:", timestr)
 
 add_path = "2025_11_26_fast_00"
+
+# --- Modifiable values
+Threshold = 106 # Maximum value for masking 
+Connectivity = 2 # Number of neighbors necessary to include in one cluster
+Cluster_size = 1 #Min nbr of neighbors to count a cluster
+
 prismWollas = ""#  input("¿ Has puesto el prisma ? : ").strip()
 estudio = "no Heat/si PBS_"
-
 if prismWollas in ["yes", "y", "Y", "Yes", "si", "Si", "SI"]:
     grad_prismWollas = float(input("Graduación del prism (en º): "))
     estudio = "no Heat/si PBS_"
@@ -33,10 +38,25 @@ def unpack_mono12_packed(buffer, width, height):
 
     assert pixels.size == width * height, "Tamaño de imagen incompatible"
     return pixels.reshape((height, width))
-
+    
+def count_clusters(img, threshold_, connectivity_ ,min_size_):
+    mask = img > threshold_
+    # extract (y,x) coordinates where pixel > threshold
+    #xs, ys = np.nonzero(mask)
+    # Analysing image
+    labeled = rmv(mask, min_size = min_size_)
+    labeled = label(mask, connectivity = connectivity_)
+    return np.nonzero(labeled)
+    
 def process_image(acquisition, width, height): # function takes ~ 20-5 ms
     raw_data = acquisition._np_data.tobytes()
+    # Decoding pixels
     img = unpack_mono12_packed(raw_data, width, height) # <class 'numpy.ndarray'>
+    # Save coordinate arrays into the acquisition object
+    xs,ys = count_clusters(img, Threshold, Connectivity, Cluster_size)
+    acquisition.coords = np.column_stack((xs, ys))   # shape (N,2)
+    #arriba no estoy seguro de si funciona correctamente. Lo de .coords y el resultado de count_cluster, necesito analizarlo bien.
+    
     acquisition._np_data = img # acquisition <class 'pyAndorSDK3.andor_acquisition.Acquisition'> 
     return acquisition
 
